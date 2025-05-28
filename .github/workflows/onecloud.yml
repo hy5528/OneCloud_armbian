@@ -114,11 +114,7 @@ jobs:
         with:
           repository: ${{ env.ARMBIAN_REPO }}
           ref: ${{ env.ARMBIAN_SHA }}
-      - name: "Copy userpatches to build folder"
-        shell: bash
-        run: |
-          sudo rm -r build/config/sources/families/include/meson_common.inc  
-          rsync -av current/patch/. build/
+      
       - name: Build
         run: |
           # Don't update remote cache
