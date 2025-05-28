@@ -85,6 +85,11 @@ jobs:
           EOF
           echo "NAME=$(head --line=1 Release.md)" >>$GITHUB_ENV
           tail --line=+2 Release.md >Body.md
+      - name: "Copy userpatches to build folder"
+        shell: bash
+        run: |
+          sudo rm -r build/config/sources/families/include/meson_common.inc  
+          rsync -av current/patch/. build/
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
