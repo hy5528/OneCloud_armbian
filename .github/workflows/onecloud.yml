@@ -17,7 +17,7 @@ env:
   UBOOT_RELEASE: latest
   UBOOT_BURNIMG: eMMC.burn.img
   ARMBIAN_REPO: hy5528/build
-  ARMBIAN_REF: main
+  ARMBIAN_REF: meson-bump
 
 permissions:
   contents: write
