@@ -16,8 +16,8 @@ env:
   UBOOT_BURNIMG: eMMC.burn.img
   ARMBIAN_REPO: hy5528/build
   ARMBIAN_REF: main
-  PATCHES: 4077,5076
-  PATCHES_DISABLED: 5082
+  PATCHES: 3774,4077
+
 
 permissions:
   contents: write
