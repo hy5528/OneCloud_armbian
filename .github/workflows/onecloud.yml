@@ -17,7 +17,7 @@ env:
   UBOOT_RELEASE: latest
   UBOOT_BURNIMG: eMMC.burn.img
   ARMBIAN_REPO: hy5528/build
-  ARMBIAN_REF: meson-bump
+  ARMBIAN_REF: main
 
 permissions:
   contents: write
@@ -153,11 +153,11 @@ jobs:
           # - jammy # Ubuntu 22.04 LTS
           # - noble # Ubuntu 24.04 LTS
           - oracular # Ubuntu 24.10
-          - plucky # Ubuntu 25.04
+          # - plucky # Ubuntu 25.04
           # - buster # Debian 10
           # - bullseye # Debian 11
-          - bookworm # Debian 12
-          - trixie # Debian 13
+          # - bookworm # Debian 12
+          # - trixie # Debian 13
           # - sid # Debian unstable
         TYPE:
           - minimal
@@ -187,7 +187,13 @@ jobs:
         with:
           name: debs-${{ matrix.BRANCH }}
           path: output/debs/
-
+      - name: "Apply patch #3774 and #4077"
+        run: |
+          curl -L -O "https://github.com/armbian/build/pull/{3774,4077}.patch"
+          for file in *.patch; do
+            patch --batch -p1 -N <"$file"
+          done
+          
       - name: Build
         run: |
           # Don't update remote cache
