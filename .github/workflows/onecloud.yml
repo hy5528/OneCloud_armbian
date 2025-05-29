@@ -18,6 +18,7 @@ env:
   UBOOT_BURNIMG: eMMC.burn.img
   ARMBIAN_REPO: hy5528/build
   ARMBIAN_REF: main
+  PATCHES: 4077,5076
 
 permissions:
   contents: write
@@ -187,12 +188,7 @@ jobs:
         with:
           name: debs-${{ matrix.BRANCH }}
           path: output/debs/
-      - name: "Apply patch #3774 and #4077"
-        run: |
-          curl -L -O "https://github.com/armbian/build/pull/{3774,4077}.patch"
-          for file in *.patch; do
-            patch --batch -p1 -N <"$file"
-          done
+      
           
       - name: Build
         run: |
