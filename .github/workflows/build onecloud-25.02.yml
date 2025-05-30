@@ -21,9 +21,6 @@ jobs:
           docker-images: true
           swap-storage: true
           
-      - name: Install key 
-        run: |
-          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys  EE727D4449467F0E
     
       - name: Checkout armbian
         run: |
@@ -47,7 +44,7 @@ jobs:
         run: |
           cd build
           # Don't update remote cache
-          sudo ./compile.sh BOARD=onecloud BRANCH=current RELEASE=jammy BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_ONLY=no KERNEL_CONFIGURE=no COMPRESS_OUTPUTIMAGE=sha,gpg,img DOWNLOAD_MIRROR=china MAINLINE_MIRROR=tuna EXTRAWIFI=no
+          sudo ./compile.sh BOARD=onecloud BRANCH=current RELEASE=bullseye BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_ONLY=no KERNEL_CONFIGURE=no COMPRESS_OUTPUTIMAGE=sha,gpg,img DOWNLOAD_MIRROR=china MAINLINE_MIRROR=tuna EXTRAWIFI=no
           sudo chown $(id -u):$(id -g) -R output/
 
       - name: Install Dependents
