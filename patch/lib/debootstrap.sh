@@ -12,7 +12,6 @@
 # Functions:
 
 # debootstrap_ng
-# get_rootfs_cache_list
 # create_rootfs_cache
 # prepare_partitions
 # update_initramfs
@@ -25,7 +24,7 @@
 #
 debootstrap_ng()
 {
-	display_alert "Checking for rootfs cache" "$(echo "${BRANCH} ${BOARD} ${RELEASE} ${DESKTOP_APPGROUPS_SELECTED} ${DESKTOP_ENVIRONMENT} ${BUILD_MINIMAL}" | tr -s " ")" "info"
+	display_alert "Starting rootfs and image building process for" "${BRANCH} ${BOARD} ${RELEASE} ${DESKTOP_APPGROUPS_SELECTED} ${DESKTOP_ENVIRONMENT} ${BUILD_MINIMAL}" "info"
 
 	[[ $ROOTFS_TYPE != ext4 ]] && display_alert "Assuming $BOARD $BRANCH kernel supports $ROOTFS_TYPE" "" "wrn"
 
@@ -83,9 +82,8 @@ PRE_INSTALL_DISTRIBUTION_SPECIFIC
 	display_alert "No longer needed packages" "purge" "info"
 	chroot $SDCARD /bin/bash -c "apt-get autoremove -y"  >/dev/null 2>&1
 
-	# create list of all installed packages for debug purposes
-	chroot $SDCARD /bin/bash -c "dpkg -l | grep ^ii | awk '{ print \$2\",\"\$3 }'" > $DEST/${LOG_SUBPATH}/installed-packages-${RELEASE}$([[ ${BUILD_MINIMAL} == yes ]] \
-	&& echo "-minimal")$([[ ${BUILD_DESKTOP} == yes  ]] && echo "-desktop").list 2>&1
+	# create list of installed packages for debug purposes
+	chroot $SDCARD /bin/bash -c "dpkg --get-selections" | grep -v deinstall | awk '{print $1}' | cut -f1 -d':' > $DEST/${LOG_SUBPATH}/installed-packages-${RELEASE}$([[ ${BUILD_MINIMAL} == yes ]] && echo "-minimal")$([[ ${BUILD_DESKTOP} == yes  ]] && echo "-desktop").list 2>&1
 
 	# clean up / prepare for making the image
 	umount_chroot "$SDCARD"
@@ -115,88 +113,86 @@ PRE_INSTALL_DISTRIBUTION_SPECIFIC
 	trap - INT TERM EXIT
 } #############################################################################
 
-# get_rootfs_cache_list <cache_type> <packages_hash>
-#
-# return a list of versions of all avaiable cache from remote and local.
-get_rootfs_cache_list()
-{
-	local cache_type=$1
-	local packages_hash=$2
-
-	{
-		# Temportally disable Github API because we don't support to download from it
-		# curl --silent --fail -L "https://api.github.com/repos/armbian/cache/releases?per_page=3" | jq -r '.[].tag_name' \
-		# || curl --silent --fail -L https://cache.armbian.com/rootfs/list
-		curl --silent --fail -L https://cache.armbian.com/rootfs/list
-
-		find ${SRC}/cache/rootfs/ -mtime -7 -name "${ARCH}-${RELEASE}-${cache_type}-${packages_hash}-*.tar.zst" \
-			| sed -e 's#^.*/##' \
-			| sed -e 's#\..*$##' \
-			| awk -F'-' '{print $5}'
-	} | sort | uniq
-}
-
 # create_rootfs_cache
 #
 # unpacks cached rootfs for $RELEASE or creates one
 #
 create_rootfs_cache()
 {
-	local packages_hash=$(get_package_list_hash)
-	local packages_hash=${packages_hash:0:8}
-
-	local cache_type="cli"
-	[[ ${BUILD_DESKTOP} == yes ]] && local cache_type="xfce-desktop"
-	[[ -n ${DESKTOP_ENVIRONMENT} ]] && local cache_type="${DESKTOP_ENVIRONMENT}"
-	[[ ${BUILD_MINIMAL} == yes ]] && local cache_type="minimal"
+	if [[ "$ROOT_FS_CREATE_ONLY" == "force" ]]; then
+		local cycles=1
+		else
+		local cycles=2
+	fi
 
 	# seek last cache, proceed to previous otherwise build it
-	local cache_list
-	readarray -t cache_list <<<"$(get_rootfs_cache_list "$cache_type" "$packages_hash" | sort -r)"
-	for ROOTFSCACHE_VERSION in "${cache_list[@]}"; do
+	for ((n=0;n<${cycles};n++)); do
 
-		local cache_name=${ARCH}-${RELEASE}-${cache_type}-${packages_hash}-${ROOTFSCACHE_VERSION}.tar.zst
+		[[ -z ${FORCED_MONTH_OFFSET} ]] && FORCED_MONTH_OFFSET=${n}
+		local packages_hash=$(get_package_list_hash "$(date -d "$D +${FORCED_MONTH_OFFSET} month" +"%Y-%m-module$ROOTFSCACHE_VERSION" | sed 's/^0*//')")
+		local cache_type="cli"
+		[[ ${BUILD_DESKTOP} == yes ]] && local cache_type="xfce-desktop"
+		[[ -n ${DESKTOP_ENVIRONMENT} ]] && local cache_type="${DESKTOP_ENVIRONMENT}"
+		[[ ${BUILD_MINIMAL} == yes ]] && local cache_type="minimal"
+		local cache_name=${RELEASE}-${cache_type}-${ARCH}.$packages_hash.tar.lz4
 		local cache_fname=${SRC}/cache/rootfs/${cache_name}
+		local display_name=${RELEASE}-${cache_type}-${ARCH}.${packages_hash:0:3}...${packages_hash:29}.tar.lz4
 
-		[[ "$ROOT_FS_CREATE_ONLY" == yes ]] && break
+		[[ "$ROOT_FS_CREATE_ONLY" == force ]] && break
 
-		display_alert "Checking cache" "$cache_name" "info"
-
-		if [[ -f ${cache_fname}.aria2 ]]; then
-			display_alert "Removing partially downloaded file."
+		if [[ -f ${cache_fname} && -f ${cache_fname}.aria2 ]]; then
 			rm ${cache_fname}*
-		fi
-
-		if [[ ! -f $cache_fname ]]; then
-			display_alert "Downloading from servers"
+			display_alert "Partially downloaded file. Re-start."
 			download_and_verify "_rootfs" "$cache_name"
 		fi
 
-		if [[ ! -f ${cache_fname} ]]; then
-			display_alert "not found"
-			continue
+		display_alert "Checking local cache" "$display_name" "info"
+
+		if [[ -f ${cache_fname} && -n "$ROOT_FS_CREATE_ONLY" ]]; then
+			touch $cache_fname.current
+			display_alert "Checking cache integrity" "$display_name" "info"
+			sudo lz4 -tqq ${cache_fname}
+			[[ $? -ne 0 ]] && rm $cache_fname && exit_with_error "Cache $cache_fname is corrupted and was deleted. Please restart!"
+			# sign if signature is missing
+			if [[ -n "${GPG_PASS}" && "${SUDO_USER}" && ! -f ${cache_fname}.asc ]]; then
+				[[ -n ${SUDO_USER} ]] && sudo chown -R ${SUDO_USER}:${SUDO_USER} "${DEST}"/images/
+				echo "${GPG_PASS}" | sudo -H -u ${SUDO_USER} bash -c "gpg --passphrase-fd 0 --armor --detach-sign --pinentry-mode loopback --batch --yes ${cache_fname}" || exit 1
+			fi
+			break
+		elif [[ -f ${cache_fname} ]]; then
+			break
+		else
+			display_alert "searching on servers"
+			download_and_verify "_rootfs" "$cache_name"
 		fi
 
-		break
+		if [[ ! -f $cache_fname ]]; then
+			display_alert "not found: try to use previous cache"
+		fi
+
 	done
 
-	# if aria2 file exists download didn't succeeded
-	if [[ "$ROOT_FS_CREATE_ONLY" != "yes" && -f $cache_fname && ! -f $cache_fname.aria2 ]]; then
+	if [[ -f $cache_fname && ! -f $cache_fname.aria2 ]]; then
+
+		# speed up checking
+		if [[ -n "$ROOT_FS_CREATE_ONLY" ]]; then
+			touch $cache_fname.current
+			umount --lazy "$SDCARD"
+			rm -rf $SDCARD
+			# remove exit trap
+			trap - INT TERM EXIT
+			exit
+		fi
 
 		local date_diff=$(( ($(date +%s) - $(stat -c %Y $cache_fname)) / 86400 ))
-		display_alert "Extracting $cache_name" "$date_diff days old" "info"
-		pv -p -b -r -c -N "[ .... ] $cache_name" "$cache_fname" | zstdmt -dc | tar xp --xattrs -C $SDCARD/
+		display_alert "Extracting $display_name" "$date_diff days old" "info"
+		pv -p -b -r -c -N "[ .... ] $display_name" "$cache_fname" | lz4 -dc | tar xp --xattrs -C $SDCARD/
 		[[ $? -ne 0 ]] && rm $cache_fname && exit_with_error "Cache $cache_fname is corrupted and was deleted. Restart."
 		rm $SDCARD/etc/resolv.conf
 		echo "nameserver $NAMESERVER" >> $SDCARD/etc/resolv.conf
 		create_sources_list "$RELEASE" "$SDCARD/"
 	else
-
-		local ROOT_FS_CREATE_VERSION=${ROOT_FS_CREATE_VERSION:-$(date --utc +"%Y%m%d")}
-		local cache_name=${ARCH}-${RELEASE}-${cache_type}-${packages_hash}-${ROOT_FS_CREATE_VERSION}.tar.zst
-		local cache_fname=${SRC}/cache/rootfs/${cache_name}
-
-		display_alert "Creating new rootfs cache for" "$RELEASE" "info"
+		display_alert "... remote not found" "Creating new rootfs cache for $RELEASE" "info"
 
 		# stage: debootstrap base system
 		if [[ $NO_APT_CACHER != yes ]]; then
@@ -255,14 +251,12 @@ create_rootfs_cache()
 		chmod 755 $SDCARD/sbin/start-stop-daemon
 
 		# stage: configure language and locales
-		display_alert "Generatining default locale" "info"
-		if [[ -f $SDCARD/etc/locale.gen ]]; then
-			sed -i '/ C.UTF-8/s/^# //g' $SDCARD/etc/locale.gen
-			sed -i '/en_US.UTF-8/s/^# //g' $SDCARD/etc/locale.gen
-		fi
-		eval 'LC_ALL=C LANG=C chroot $SDCARD /bin/bash -c "locale-gen"' ${OUTPUT_VERYSILENT:+' >/dev/null 2>&1'}
-		eval 'LC_ALL=C LANG=C chroot $SDCARD /bin/bash -c "update-locale --reset LANG=en_US.UTF-8"' \
-			${OUTPUT_VERYSILENT:+' >/dev/null 2>&1'}
+		display_alert "Configuring locales" "$DEST_LANG" "info"
+
+		[[ -f $SDCARD/etc/locale.gen ]] && sed -i "s/^# $DEST_LANG/$DEST_LANG/" $SDCARD/etc/locale.gen
+		eval 'LC_ALL=C LANG=C chroot $SDCARD /bin/bash -c "locale-gen $DEST_LANG"' ${OUTPUT_VERYSILENT:+' >/dev/null 2>/dev/null'}
+		eval 'LC_ALL=C LANG=C chroot $SDCARD /bin/bash -c "update-locale LANG=$DEST_LANG LANGUAGE=$DEST_LANG LC_MESSAGES=$DEST_LANG"' \
+			${OUTPUT_VERYSILENT:+' >/dev/null 2>/dev/null'}
 
 		if [[ -f $SDCARD/etc/default/console-setup ]]; then
 			sed -e 's/CHARMAP=.*/CHARMAP="UTF-8"/' -e 's/FONTSIZE=.*/FONTSIZE="8x16"/' \
@@ -336,12 +330,6 @@ create_rootfs_cache()
 			[[ ${EVALPIPE[0]} -ne 0 ]] && exit_with_error "Installation of Armbian desktop packages for ${BRANCH} ${BOARD} ${RELEASE} ${DESKTOP_APPGROUPS_SELECTED} ${DESKTOP_ENVIRONMENT} ${BUILD_MINIMAL} failed"
 		fi
 
-		# stage: check md5 sum of installed packages. Just in case.
-		display_alert "Checking MD5 sum of installed packages" "debsums" "info"
-		eval 'LC_ALL=C LANG=C sudo chroot $SDCARD /bin/bash -e -c "dpkg-query -f ${binary:Package} -W | xargs debsums"' \
-			${PROGRESS_LOG_TO_FILE:+' | tee -a $DEST/${LOG_SUBPATH}/debootstrap.log'} '>/dev/null 2>/dev/null'} ';EVALPIPE=(${PIPESTATUS[@]})'
-		[[ ${EVALPIPE[0]} -ne 0 ]] && exit_with_error "MD5 sums check of installed packages failed"
-
 		# Remove packages from packages.uninstall
 
 		display_alert "Uninstall packages" "$PACKAGE_LIST_UNINSTALL" "info"
@@ -369,12 +357,12 @@ create_rootfs_cache()
 
 		# DEBUG: print free space
 		local freespace=$(LC_ALL=C df -h)
-		echo -e "$freespace" >> $DEST/${LOG_SUBPATH}/debootstrap.log
+		echo $freespace >> $DEST/${LOG_SUBPATH}/debootstrap.log
 		display_alert "Free SD cache" "$(echo -e "$freespace" | grep $SDCARD | awk '{print $5}')" "info"
 		display_alert "Mount point" "$(echo -e "$freespace" | grep $MOUNT | head -1 | awk '{print $5}')" "info"
 
 		# create list of installed packages for debug purposes
-		chroot $SDCARD /bin/bash -c "dpkg -l | grep ^ii | awk '{ print \$2\",\"\$3 }'" > ${cache_fname}.list 2>&1
+		chroot $SDCARD /bin/bash -c "dpkg --get-selections" | grep -v deinstall | awk '{print $1}' | cut -f1 -d':' > ${cache_fname}.list 2>&1
 
 		# creating xapian index that synaptic runs faster
 		if [[ $BUILD_DESKTOP == yes ]]; then
@@ -394,7 +382,7 @@ create_rootfs_cache()
 		umount_chroot "$SDCARD"
 
 		tar cp --xattrs --directory=$SDCARD/ --exclude='./dev/*' --exclude='./proc/*' --exclude='./run/*' --exclude='./tmp/*' \
-			--exclude='./sys/*' --exclude='./home/*' --exclude='./root/*' . | pv -p -b -r -s $(du -sb $SDCARD/ | cut -f1) -N "$cache_name" | zstdmt -5 -c > $cache_fname
+			--exclude='./sys/*' --exclude='./home/*' --exclude='./root/*' . | pv -p -b -r -s $(du -sb $SDCARD/ | cut -f1) -N "$display_name" | lz4 -5 -c > $cache_fname
 
 		# sign rootfs cache archive that it can be used for web cache once. Internal purposes
 		if [[ -n "${GPG_PASS}" && "${SUDO_USER}" ]]; then
@@ -402,10 +390,13 @@ create_rootfs_cache()
 			echo "${GPG_PASS}" | sudo -H -u ${SUDO_USER} bash -c "gpg --passphrase-fd 0 --armor --detach-sign --pinentry-mode loopback --batch --yes ${cache_fname}" || exit 1
 		fi
 
+		# needed for backend to keep current only
+		touch $cache_fname.current
+
 	fi
 
 	# used for internal purposes. Faster rootfs cache rebuilding
-	if [[ "$ROOT_FS_CREATE_ONLY" == "yes" ]]; then
+	if [[ -n "$ROOT_FS_CREATE_ONLY" ]]; then
 		umount --lazy "$SDCARD"
 		rm -rf $SDCARD
 		# remove exit trap
@@ -435,7 +426,7 @@ prepare_partitions()
 
 	# array copying in old bash versions is tricky, so having filesystems as arrays
 	# with attributes as keys is not a good idea
-	declare -A parttype mkopts mkopts_label mkfs mountopts
+	declare -A parttype mkopts mkfs mountopts
 
 	parttype[ext4]=ext4
 	parttype[ext2]=ext2
@@ -452,20 +443,12 @@ prepare_partitions()
 	if [[ $HOSTRELEASE =~ buster|bullseye|focal|jammy|sid ]]; then
 		mkopts[ext4]="-q -m 2 -O ^64bit,^metadata_csum -N $((128*${node_number}))"
 	fi
-	# mkopts[fat] is empty
+	mkopts[fat]='-n BOOT'
 	mkopts[ext2]='-q'
 	# mkopts[f2fs] is empty
 	mkopts[btrfs]='-m dup'
 	# mkopts[xfs] is empty
 	# mkopts[nfs] is empty
-
-	mkopts_label[ext4]='-L '
-	mkopts_label[ext2]='-L '
-	mkopts_label[fat]='-n '
-	mkopts_label[f2fs]='-l '
-	mkopts_label[btrfs]='-L '
-	mkopts_label[xfs]='-L '
-	# mkopts_label[nfs] is empty
 
 	mkfs[ext4]=ext4
 	mkfs[ext2]=ext2
@@ -489,9 +472,7 @@ prepare_partitions()
 	UEFISIZE=${UEFISIZE:-0}
 	BIOSSIZE=${BIOSSIZE:-0}
 	UEFI_MOUNT_POINT=${UEFI_MOUNT_POINT:-/boot/efi}
-	UEFI_FS_LABEL="${UEFI_FS_LABEL:-armbi_efi}"
-	ROOT_FS_LABEL="${ROOT_FS_LABEL:-armbi_root}"
-	BOOT_FS_LABEL="${BOOT_FS_LABEL:-armbi_boot}"
+	UEFI_FS_LABEL="${UEFI_FS_LABEL:-armbiefi}"
 
 	call_extension_method "pre_prepare_partitions" "prepare_partitions_custom" <<'PRE_PREPARE_PARTITIONS'
 *allow custom options for mkfs*
@@ -499,28 +480,44 @@ Good time to change stuff like mkfs opts, types etc.
 PRE_PREPARE_PARTITIONS
 
 	# stage: determine partition configuration
-	local next=1
-	# Check if we need UEFI partition
-	if [[ $UEFISIZE -gt 0 ]]; then
-		if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
-			local uefipart=15
-			# Check if we need BIOS partition
-			[[ $BIOSSIZE -gt 0 ]] && local biospart=14
-		else
-			local uefipart=$(( next++ ))
-		fi
-	fi
-	# Check if we need boot partition
-	if [[ -n $BOOTFS_TYPE || $ROOTFS_TYPE != ext4 || $CRYPTROOT_ENABLE == yes ]]; then
-		local bootpart=$(( next++ ))
-		local bootfs=${BOOTFS_TYPE:-ext4}
+	if [[ -n $BOOTFS_TYPE ]]; then
+		# 2 partition setup with forced /boot type
+		local bootfs=$BOOTFS_TYPE
+		local bootpart=1
+		local rootpart=2
 		[[ -z $BOOTSIZE || $BOOTSIZE -le 8 ]] && BOOTSIZE=${DEFAULT_BOOTSIZE}
+	elif [[ $ROOTFS_TYPE != ext4 && $ROOTFS_TYPE != nfs ]]; then
+		# 2 partition setup for non-ext4 local root
+		local bootfs=ext4
+		local bootpart=1
+		local rootpart=2
+		[[ -z $BOOTSIZE || $BOOTSIZE -le 8 ]] && BOOTSIZE=${DEFAULT_BOOTSIZE}
+	elif [[ $ROOTFS_TYPE == nfs ]]; then
+		# single partition ext4 /boot, no root
+		local bootfs=ext4
+		local bootpart=1
+		[[ -z $BOOTSIZE || $BOOTSIZE -le 8 ]] && BOOTSIZE=${DEFAULT_BOOTSIZE} # For cleanup processing only
+	elif [[ $CRYPTROOT_ENABLE == yes ]]; then
+		# 2 partition setup for encrypted /root and non-encrypted /boot
+		local bootfs=ext4
+		local bootpart=1
+		local rootpart=2
+		[[ -z $BOOTSIZE || $BOOTSIZE -le 8 ]] && BOOTSIZE=${DEFAULT_BOOTSIZE}
+	elif [[ $UEFISIZE -gt 0 ]]; then
+		if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
+			# efi partition and ext4 root. some juggling is done by parted/sgdisk
+			local uefipart=15
+			local rootpart=1
+		else
+			# efi partition and ext4 root.
+			local uefipart=1
+			local rootpart=2
+		fi
 	else
+		# single partition ext4 root
+		local rootpart=1
 		BOOTSIZE=0
 	fi
-	# Check if we need root partition
-	[[ $ROOTFS_TYPE != nfs ]] \
-		&& local rootpart=$(( next++ ))
 
 	# stage: calculate rootfs size
 	export rootfs_size=$(du -sm $SDCARD/ | cut -f1) # MiB
@@ -546,9 +543,9 @@ PREPARE_IMAGE_SIZE
 		# Hardcoded overhead +25% is needed for desktop images,
 		# for CLI it could be lower. Align the size up to 4MiB
 		if [[ $BUILD_DESKTOP == yes ]]; then
-			local sdsize=$(bc -l <<< "scale=0; ((($imagesize * 1.35) / 1 + 0) / 4 + 1) * 4")
-		else
 			local sdsize=$(bc -l <<< "scale=0; ((($imagesize * 1.30) / 1 + 0) / 4 + 1) * 4")
+		else
+			local sdsize=$(bc -l <<< "scale=0; ((($imagesize * 1.25) / 1 + 0) / 4 + 1) * 4")
 		fi
 	fi
 
@@ -561,51 +558,66 @@ PREPARE_IMAGE_SIZE
 		dd if=/dev/zero bs=1M status=none count=$sdsize | pv -p -b -r -s $(( $sdsize * 1024 * 1024 )) -N "[ .... ] dd" | dd status=none of=${SDCARD}.raw
 	fi
 
+	# stage: calculate boot partition size
+	local bootstart=$(($OFFSET * 2048))
+	local rootstart=$(($bootstart + ($BOOTSIZE * 2048) + ($UEFISIZE * 2048)))
+	local bootend=$(($rootstart - 1))
+
 	# stage: create partition table
 	display_alert "Creating partitions" "${bootfs:+/boot: $bootfs }root: $ROOTFS_TYPE" "info"
+	parted -s ${SDCARD}.raw -- mklabel ${IMAGE_PARTITION_TABLE}
 	if [[ "${USE_HOOK_FOR_PARTITION}" == "yes" ]]; then
-		{
-			[[ "$IMAGE_PARTITION_TABLE" == "msdos" ]] \
-				&& echo "label: dos" \
-				|| echo "label: $IMAGE_PARTITION_TABLE"
-		} | sfdisk ${SDCARD}.raw >>"${DEST}/${LOG_SUBPATH}/install.log" 2>&1 \
-			|| exit_with_error "Create partition table fail. Please check" "${DEST}/${LOG_SUBPATH}/install.log"
-
 		call_extension_method "create_partition_table" <<- 'CREATE_PARTITION_TABLE'
 		*only called when USE_HOOK_FOR_PARTITION=yes to create the complete partition table*
 		Finally, we can get our own partition table. You have to partition ${SDCARD}.raw
 		yourself. Good luck.
 		CREATE_PARTITION_TABLE
+	elif [[ $ROOTFS_TYPE == nfs ]]; then
+		# single /boot partition
+		parted -s ${SDCARD}.raw -- mkpart primary ${parttype[$bootfs]} ${bootstart}s "100%"
+	elif [[ $UEFISIZE -gt 0 ]]; then
+		# uefi partition + root partition
+		if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
+			if [[ ${BIOSSIZE} -gt 0 ]]; then
+				display_alert "Creating partitions" "BIOS+UEFI+rootfs" "info"
+				# UEFI + GPT automatically get a BIOS partition at 14, EFI at 15
+				local biosstart=$(($OFFSET * 2048))
+				local uefistart=$(($OFFSET * 2048 + ($BIOSSIZE * 2048)))
+				local rootstart=$(($uefistart + ($UEFISIZE * 2048) ))
+				local biosend=$(($uefistart - 1))
+				local uefiend=$(($rootstart - 1))
+				parted -s ${SDCARD}.raw -- mkpart bios fat32 ${biosstart}s ${biosend}s
+				parted -s ${SDCARD}.raw -- mkpart efi fat32 ${uefistart}s ${uefiend}s
+				parted -s ${SDCARD}.raw -- mkpart rootfs ${parttype[$ROOTFS_TYPE]} ${rootstart}s "100%"
+				# transpose so BIOS is in sda14; EFI is in sda15 and root in sda1; requires sgdisk, parted cant do numbers
+				sgdisk --transpose 1:14 ${SDCARD}.raw &> /dev/null || echo "*** TRANSPOSE 1:14 FAILED"
+				sgdisk --transpose 2:15 ${SDCARD}.raw &> /dev/null || echo "*** TRANSPOSE 2:15 FAILED"
+				sgdisk --transpose 3:1 ${SDCARD}.raw &> /dev/null || echo "*** TRANSPOSE 3:1 FAILED"
+				# set the ESP (efi) flag on 15
+				parted -s ${SDCARD}.raw -- set 14 bios_grub on || echo "*** SETTING bios_grub ON 14 FAILED"
+				parted -s ${SDCARD}.raw -- set 15 esp on || echo "*** SETTING ESP ON 15 FAILED"
+			else
+				display_alert "Creating partitions" "UEFI+rootfs (no BIOS)" "info"
+				# Simple EFI + root partition on GPT, no BIOS.
+				parted -s ${SDCARD}.raw -- mkpart efi fat32 ${bootstart}s ${bootend}s
+				parted -s ${SDCARD}.raw -- mkpart rootfs ${parttype[$ROOTFS_TYPE]} ${rootstart}s "100%"
+				# transpose so EFI is in sda15 and root in sda1; requires sgdisk, parted cant do numbers
+				sgdisk --transpose 1:15 ${SDCARD}.raw &> /dev/null || echo "*** TRANSPOSE 1:15 FAILED"
+				sgdisk --transpose 2:1 ${SDCARD}.raw &> /dev/null || echo "*** TRANSPOSE 2:1 FAILED"
+				# set the ESP (efi) flag on 15
+				parted -s ${SDCARD}.raw -- set 15 esp on || echo "*** SETTING ESP ON 15 FAILED"
+			fi
+		else
+			parted -s ${SDCARD}.raw -- mkpart primary fat32 ${bootstart}s ${bootend}s
+			parted -s ${SDCARD}.raw -- mkpart primary ${parttype[$ROOTFS_TYPE]} ${rootstart}s "100%"
+		fi
+	elif [[ $BOOTSIZE == 0 ]]; then
+		# single root partition
+		parted -s ${SDCARD}.raw -- mkpart primary ${parttype[$ROOTFS_TYPE]} ${rootstart}s "100%"
 	else
-		{
-			[[ "$IMAGE_PARTITION_TABLE" == "msdos" ]] \
-				&& echo "label: dos" \
-				|| echo "label: $IMAGE_PARTITION_TABLE"
-
-			local next=$OFFSET
-			if [[ -n "$biospart" ]]; then
-				echo "$biospart : name=\"bios\", start=${next}MiB, size=${BIOSSIZE}MiB, type=\"BIOS boot\""
-				local next=$(( $next + $BIOSSIZE ))
-			fi
-			if [[ -n "$uefipart" ]]; then
-				echo "$uefipart : name=\"efi\", start=${next}MiB, size=${UEFISIZE}MiB, type=uefi"
-				local next=$(( $next + $UEFISIZE ))
-			fi
-			if [[ -n "$bootpart" ]]; then
-				if [[ -n "$rootpart" ]]; then
-					echo "$bootpart : name=\"bootfs\", start=${next}MiB, size=${BOOTSIZE}MiB, type=\"Linux extended boot\""
-					local next=$(( $next + $BOOTSIZE ))
-				else
-					# no `size` argument mean "as much as possible"
-					echo "$bootpart : name=\"bootfs\", start=${next}MiB, type=linux"
-				fi
-			fi
-			if [[ -n "$rootpart" ]]; then
-				# no `size` argument  mean "as much as possible"
-				echo "$rootpart : name=\"rootfs\", start=${next}MiB, type=linux"
-			fi
-		} | sfdisk ${SDCARD}.raw >>"${DEST}/${LOG_SUBPATH}/install.log" 2>&1 \
-			|| exit_with_error "Partition fail. Please check" "${DEST}/${LOG_SUBPATH}/install.log"
+		# /boot partition + root partition
+		parted -s ${SDCARD}.raw -- mkpart primary ${parttype[$bootfs]} ${bootstart}s ${bootend}s
+		parted -s ${SDCARD}.raw -- mkpart primary ${parttype[$ROOTFS_TYPE]} ${rootstart}s "100%"
 	fi
 
 	call_extension_method "post_create_partitions" <<- 'POST_CREATE_PARTITIONS'
@@ -645,7 +657,7 @@ PREPARE_IMAGE_SIZE
 
 		check_loop_device "$rootdevice"
 		display_alert "Creating rootfs" "$ROOTFS_TYPE on $rootdevice"
-		mkfs.${mkfs[$ROOTFS_TYPE]} ${mkopts[$ROOTFS_TYPE]} ${mkopts_label[$ROOTFS_TYPE]:+${mkopts_label[$ROOTFS_TYPE]}"$ROOT_FS_LABEL"} $rootdevice >> "${DEST}"/${LOG_SUBPATH}/install.log 2>&1
+		mkfs.${mkfs[$ROOTFS_TYPE]} ${mkopts[$ROOTFS_TYPE]} $rootdevice >> "${DEST}"/${LOG_SUBPATH}/install.log 2>&1
 		[[ $ROOTFS_TYPE == ext4 ]] && tune2fs -o journal_data_writeback $rootdevice > /dev/null
 		if [[ $ROOTFS_TYPE == btrfs && $BTRFS_COMPRESSION != none ]]; then
 			local fscreateopt="-o compress-force=${BTRFS_COMPRESSION}"
@@ -660,15 +672,11 @@ PREPARE_IMAGE_SIZE
 			local rootfs="UUID=$(blkid -s UUID -o value $rootdevice)"
 		fi
 		echo "$rootfs / ${mkfs[$ROOTFS_TYPE]} defaults,noatime${mountopts[$ROOTFS_TYPE]} 0 1" >> $SDCARD/etc/fstab
-	else
-		# update_initramfs will fail if /lib/modules/ doesn't exist
-		mount --bind --make-private $SDCARD $MOUNT/
-		echo "/dev/nfs / nfs defaults 0 0" >> $SDCARD/etc/fstab
 	fi
 	if [[ -n $bootpart ]]; then
 		display_alert "Creating /boot" "$bootfs on ${LOOP}p${bootpart}"
 		check_loop_device "${LOOP}p${bootpart}"
-		mkfs.${mkfs[$bootfs]} ${mkopts[$bootfs]} ${mkopts_label[$bootfs]:+${mkopts_label[$bootfs]}"$BOOT_FS_LABEL"} ${LOOP}p${bootpart} >> "${DEST}"/${LOG_SUBPATH}/install.log 2>&1
+		mkfs.${mkfs[$bootfs]} ${mkopts[$bootfs]} ${LOOP}p${bootpart} >> "${DEST}"/${LOG_SUBPATH}/install.log 2>&1
 		mkdir -p $MOUNT/boot/
 		mount ${LOOP}p${bootpart} $MOUNT/boot/
 		echo "UUID=$(blkid -s UUID -o value ${LOOP}p${bootpart}) /boot ${mkfs[$bootfs]} defaults${mountopts[$bootfs]} 0 2" >> $SDCARD/etc/fstab
@@ -681,6 +689,7 @@ PREPARE_IMAGE_SIZE
 		mount ${LOOP}p${uefipart} "${MOUNT}${UEFI_MOUNT_POINT}"
 		echo "UUID=$(blkid -s UUID -o value ${LOOP}p${uefipart}) ${UEFI_MOUNT_POINT} vfat defaults 0 2" >>$SDCARD/etc/fstab
 	fi
+	[[ $ROOTFS_TYPE == nfs ]] && echo "/dev/nfs / nfs defaults 0 0" >> $SDCARD/etc/fstab
 	echo "tmpfs /tmp tmpfs defaults,nosuid 0 0" >> $SDCARD/etc/fstab
 
 	call_extension_method "format_partitions" <<- 'FORMAT_PARTITIONS'
@@ -720,14 +729,14 @@ PREPARE_IMAGE_SIZE
 	# if we have a headless device, set console to DEFAULT_CONSOLE
 	if [[ -n $DEFAULT_CONSOLE && -f $SDCARD/boot/armbianEnv.txt ]]; then
 		if grep -lq "^console=" $SDCARD/boot/armbianEnv.txt; then
-			sed -i "s/^console=.*/console=$DEFAULT_CONSOLE/" $SDCARD/boot/armbianEnv.txt
+			sed -i "s/console=.*/console=$DEFAULT_CONSOLE/" $SDCARD/boot/armbianEnv.txt
 		else
 			echo "console=$DEFAULT_CONSOLE" >> $SDCARD/boot/armbianEnv.txt
 	        fi
 	fi
 
 	# recompile .cmd to .scr if boot.cmd exists
-
+    
 	if [[ -f $SDCARD/boot/boot.cmd ]]; then
 		if [ -z $BOOTSCRIPT_OUTPUT ]; then BOOTSCRIPT_OUTPUT=boot.scr; fi
 		mkimage -C none -A arm -T script -d $SDCARD/boot/boot.cmd $SDCARD/boot/$BOOTSCRIPT_OUTPUT > /dev/null 2>&1
@@ -763,7 +772,7 @@ update_initramfs()
 		find ${chroot_target}/lib/modules/ -maxdepth 1 -type d -name "*${VER}*"
 	)
 	if [ "$target_dir" != "" ]; then
-		update_initramfs_cmd="TMPDIR=/tmp update-initramfs -uv -k $(basename $target_dir)"
+		update_initramfs_cmd="update-initramfs -uv -k $(basename $target_dir)"
 	else
 		exit_with_error "No kernel installed for the version" "${VER}"
 	fi
@@ -844,7 +853,7 @@ PRE_UPDATE_INITRAMFS
 
 	# DEBUG: print free space
 	local freespace=$(LC_ALL=C df -h)
-	echo -e "$freespace" >> $DEST/${LOG_SUBPATH}/debootstrap.log
+	echo $freespace >> $DEST/${LOG_SUBPATH}/debootstrap.log
 	display_alert "Free SD cache" "$(echo -e "$freespace" | grep $SDCARD | awk '{print $5}')" "info"
 	display_alert "Mount point" "$(echo -e "$freespace" | grep $MOUNT | head -1 | awk '{print $5}')" "info"
 
@@ -864,16 +873,11 @@ PRE_UPDATE_INITRAMFS
 Called before unmounting both `/root` and `/boot`.
 PRE_UMOUNT_FINAL_IMAGE
 
-	# Check the partition table after the uboot code has been written
-	# and print to the log file.
-	echo -e "\nPartition table after write_uboot $LOOP" >>$DEST/${LOG_SUBPATH}/debootstrap.log
-	sfdisk -l $LOOP >>$DEST/${LOG_SUBPATH}/debootstrap.log
-
 	# unmount /boot/efi first, then /boot, rootfs third, image file last
 	sync
 	[[ $UEFISIZE != 0 ]] && umount -l "${MOUNT}${UEFI_MOUNT_POINT}"
 	[[ $BOOTSIZE != 0 ]] && umount -l $MOUNT/boot
-	umount -l $MOUNT
+	[[ $ROOTFS_TYPE != nfs ]] && umount -l $MOUNT
 	[[ $CRYPTROOT_ENABLE == yes ]] && cryptsetup luksClose $ROOT_MAPPER
 
 	call_extension_method "post_umount_final_image" "config_post_umount_final_image" << 'POST_UMOUNT_FINAL_IMAGE'
@@ -916,9 +920,16 @@ POST_UMOUNT_FINAL_IMAGE
 			display_alert "Compressing" "${DESTIMG}/${version}.img.xz" "info"
 			# compressing consumes a lot of memory we don't have. Waiting for previous packing job to finish helps to run a lot more builds in parallel
 			available_cpu=$(grep -c 'processor' /proc/cpuinfo)
+			#[[ ${BUILD_ALL} == yes ]] && available_cpu=$(( $available_cpu * 30 / 100 )) # lets use 20% of resources in case of build-all
 			[[ ${available_cpu} -gt 16 ]] && available_cpu=16 # using more cpu cores for compressing is pointless
 			available_mem=$(LC_ALL=c free | grep Mem | awk '{print $4/$2 * 100.0}' | awk '{print int($1)}') # in percentage
 			# build optimisations when memory drops below 5%
+			if [[ ${BUILD_ALL} == yes && ( ${available_mem} -lt 15 || $(ps -uax | grep "pixz" | wc -l) -gt 4 )]]; then
+				while [[ $(ps -uax | grep "pixz" | wc -l) -gt 2 ]]
+					do echo -en "#"
+					sleep 20
+				done
+			fi
 			pixz -7 -p ${available_cpu} -f $(expr ${available_cpu} + 2) < $DESTIMG/${version}.img > ${DESTIMG}/${version}.img.xz
 			compression_type=".xz"
 		fi
