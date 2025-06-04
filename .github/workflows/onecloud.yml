@@ -12,7 +12,7 @@ on:
         type: choice
         options:
         - current
-        - edge
+        # - edge
 
 permissions:
   contents: write
@@ -26,19 +26,19 @@ jobs:
       matrix:
         IMAGE_TYPE: 
           - minimal
-          - cli
+          # - cli
           #- desktop         
         RELEASE_type:
           # - focal # Ubuntu 20.04 LTS
-          # - jammy # Ubuntu 22.04 LTS
-          - noble # Ubuntu 24.04 LTS
-          - oracular # Ubuntu 24.10
-          - plucky # Ubuntu 25.04
+          - jammy # Ubuntu 22.04 LTS
+          # - noble # Ubuntu 24.04 LTS
+          # - oracular # Ubuntu 24.10
+          # - plucky # Ubuntu 25.04
           # - buster # Debian 10
           # - bullseye # Debian 11
           - bookworm # Debian 12
-          - trixie # Debian 13
-          - sid # Debian unstable
+          # - trixie # Debian 13
+          # - sid # Debian unstable
         
     steps:
       - name: 清理服务器空间(Ubuntu)
@@ -76,7 +76,7 @@ jobs:
     
       - name: 下载最新armbian库
         run: |
-           git clone --depth=1 --branch=main https://github.com/armbian/build build
+           git clone --depth=1 --branch=v23.02 https://github.com/armbian/build build
            
            TIME="$(curl https://api.github.com/repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID} | jq -r .created_at)"
            TAG="玩客云armbian最新版-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S-%Z')"
