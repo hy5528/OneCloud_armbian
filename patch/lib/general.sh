@@ -56,7 +56,6 @@ cleaning()
 			find "${DEB_STORAGE}" -name "${CHOSEN_UBOOT}_*.deb" -delete
 			find "${DEB_STORAGE}" \( -name "${CHOSEN_KERNEL}_*.deb" -o \
 				-name "armbian-*.deb" -o \
-				-name "plymouth-theme-armbian_*.deb" -o \
 				-name "${CHOSEN_KERNEL/image/dtb}_*.deb" -o \
 				-name "${CHOSEN_KERNEL/image/headers}_*.deb" -o \
 				-name "${CHOSEN_KERNEL/image/source}_*.deb" -o \
@@ -154,10 +153,8 @@ get_package_list_hash()
 	local list_content
 	read -ra package_arr <<< "${DEBOOTSTRAP_LIST} ${PACKAGE_LIST}"
 	read -ra exclude_arr <<< "${PACKAGE_LIST_EXCLUDE}"
-	(
-		printf "%s\n" "${package_arr[@]}"
-		printf -- "-%s\n" "${exclude_arr[@]}"
-	) | sort -u | md5sum | cut -d' ' -f 1
+	( ( printf "%s\n" "${package_arr[@]}"; printf -- "-%s\n" "${exclude_arr[@]}" ) | sort -u; echo "${1}" ) \
+		| md5sum | cut -d' ' -f 1
 }
 
 # create_sources_list <release> <basedir>
@@ -1409,7 +1406,7 @@ prepare_host()
 	nfs-kernel-server ntpdate p7zip-full parted patchutils pigz pixz          \
 	pkg-config pv python3-dev python3-distutils qemu-user-static rsync swig   \
 	systemd-container u-boot-tools udev unzip uuid-dev wget whiptail zip      \
-	zlib1g-dev zstd fdisk"
+	zlib1g-dev zstd"
 
   if [[ $(dpkg --print-architecture) == amd64 ]]; then
 
