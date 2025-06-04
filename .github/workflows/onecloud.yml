@@ -1,4 +1,5 @@
-ame: 玩客云armbain简版
+name: 玩客云armbain最新版
+#6.12内核只有noble、oracular、plucky、bullseye、bookworm编译成功
 
 on:
   #对应的是 UTC 时间，需要转换，0 代表北京时间8点，每个月1日/15日12点编译一次
@@ -14,31 +15,110 @@ on:
         - current
         - edge
 
-#CI权限
-permissions: write-all
+env:
+  PATCHES: 4077,5076
+  PATCHES_DISABLED: 5082
+  
+permissions:
+  contents: write
   
 jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.get.outputs.env }}
+    steps:
+      - name: 检查项目
+        uses: actions/checkout@main
+
+      - name: 下载最新armbian库
+        run: |
+           git clone --depth=1 --branch=main https://github.com/armbian/build build
+           
+           TIME="$(curl https://api.github.com/repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID} | jq -r .created_at)"
+           TAG="玩客云armbian最新版-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S-%Z')"
+           export CORE_TAG=${TAG}
+          
+           cat <<EOF | sed -E 's/^  //' >>$GITHUB_ENV
+              TIME=$TIME
+              TAG=$TAG
+              CORE_TAG=$CORE_TAG
+              PATCHES={${PATCHES}}
+              PATCHES_DISABLED={${PATCHES_DISABLED}}
+              BRANCH_TYPE=${{ github.event.inputs.BRANCH_TYPE }}
+           EOF
+           echo "env=$(cat $GITHUB_ENV | base64 -w 0)" >>$GITHUB_OUTPUT
+           
+      - name: 打补丁
+        run: |
+          cd build
+          
+          echo "::group::Download"
+          curl -L -O "https://github.com/armbian/build/pull/{${PATCHES}}.patch"
+          echo "::endgroup::"
+          
+          for file in *.patch; do
+            echo "::group::Applying $file"
+            patch --batch -p1 -N <"$file"
+            echo "::endgroup::"
+          done
+
+      - name: 预编译
+        run: |
+          # Don't update remote cache
+          cd build  
+          export GITHUB_ACTIONS=false
+          sudo --preserve-env \
+            ./compile.sh kernel \
+              ALLOW_ROOT=yes \
+              BOARD=onecloud \
+              BRANCH=${{ github.event.inputs.BRANCH_TYPE }} \
+              EXPERT=yes \
+              USE_CCACHE=no
+          sudo chown $(id -u):$(id -g) -R output/
+
+      - name: 上传资料
+        uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ github.event.inputs.BRANCH_TYPE }}
+          path: build/output/debs/*
+
+      - name: 上传标签
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.CORE_TAG }}
+          files: |
+            build/output/debs/*
+
   build_armbian_firmware:
-    name:  编译-${{ github.event.inputs.BRANCH_TYPE }}_${{ matrix.IMAGE_TYPE }}_${{ matrix.RELEASE_type }}
+    name:  编译-${{ matrix.TYPE }}_${{ matrix.RELEASE }}
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        #IMAGE_TYPE: [minimal, cli, desktop]
-        IMAGE_TYPE: [minimal, cli]
-        RELEASE_type:
+        RELEASE:
           # - focal # Ubuntu 20.04 LTS
           # - jammy # Ubuntu 22.04 LTS
           # - noble # Ubuntu 24.04 LTS
-          - oracular # Ubuntu 24.10
+          # - oracular # Ubuntu 24.10
           - plucky # Ubuntu 25.04
           # - buster # Debian 10
           # - bullseye # Debian 11
-          - bookworm # Debian 12
+          # - bookworm # Debian 12
           - trixie # Debian 13
           # - sid # Debian unstable
+        TYPE:
+          - minimal
+          - cli
+          #- desktop      
         
     steps:
+      - name: 获得环境变量
+        run: |
+          echo "$(echo "${{ needs.prepare.outputs.env }}" | base64 -d)" >>$GITHUB_ENV
+          
       - name: 清理服务器空间(Ubuntu)
         uses: rmoyulong/free-disk-space@main
         with:
@@ -54,7 +134,7 @@ jobs:
           large-packages: true
           docker-images: true
           swap-storage: true
-            
+          
       - name: 检查项目
         uses: actions/checkout@main
  
@@ -75,28 +155,43 @@ jobs:
       - name: 下载最新armbian库
         run: |
            git clone --depth=1 --branch=main https://github.com/armbian/build build
-           
-           CORE_DATE=$(TZ=Asia/Shanghai date +"%y.%m.%d")
-           CORE_TAG="玩客云armbian简化版_"
-           show_tag_name=${CORE_TAG}${CORE_DATE}
-           echo "show_tag_name=$show_tag_name" >> $GITHUB_ENV
+
+      - name: 打补丁
+        run: |
+          cd build
+          
+          echo "::group::Download"
+          curl -L -O "https://github.com/armbian/build/pull/{${PATCHES}}.patch"
+          echo "::endgroup::"
+          
+          for file in *.patch; do
+            echo "::group::Applying $file"
+            patch --batch -p1 -N <"$file"
+            echo "::endgroup::"
+          done
+
+      - name: 下载debs资料
+        uses: actions/download-artifact@v4
+        with:
+          name: debs-${{ env.BRANCH_TYPE }}
+          path: build/output/debs/
+          
       - name: 编译
         run: |
-          # Don't update remote cache
-          export GITHUB_ACTIONS=false
           cd build
-          if [[ "${{ matrix.IMAGE_TYPE }}" == "*desktop*" ]]; then
+          export GITHUB_ACTIONS=false
+          if [[  "matrix.TYPE" == "*desktop*" ]]; then
               sudo --preserve-env \
                 ./compile.sh build \
                   ALLOW_ROOT=yes \
                   BOARD=onecloud \
-                  BRANCH=${{ github.event.inputs.BRANCH_TYPE }} \
-                  RELEASE=${{ matrix.RELEASE_type }} \
+                  BRANCH=${{ env.BRANCH_TYPE }} \
+                  RELEASE=${{ matrix.RELEASE }} \
                   KERNEL_CONFIGURE=no \
-                  BUILD_MINIMAL=${{ matrix.IMAGE_TYPE == 'minimal' && 'yes' || 'no' }} \
-                  BUILD_DESKTOP=${{ matrix.IMAGE_TYPE == 'desktop' && 'yes' || 'no' }} \
-                  DESKTOP_ENVIRONMENT="xfce" \
-                  DESKTOP_ENVIRONMENT_CONFIG_NAME="config_base" \
+                  BUILD_MINIMAL=no \
+                  BUILD_DESKTOP=yes \
+                  DESKTOP_ENVIRONMENT=xfce \
+                  DESKTOP_ENVIRONMENT_CONFIG_NAME=config_base \
                   DESKTOP_APPGROUPS_SELECTED="" \
                   EXPERT=yes \
                   SKIP_EXTERNAL_TOOLCHAINS=yes \
@@ -108,11 +203,11 @@ jobs:
                 ./compile.sh build \
                   ALLOW_ROOT=yes \
                   BOARD=onecloud \
-                  BRANCH=${{ github.event.inputs.BRANCH_TYPE }} \
-                  RELEASE=${{ matrix.RELEASE_type }} \
+                  BRANCH=${{ env.BRANCH_TYPE }} \
+                  RELEASE=${{ matrix.RELEASE }} \
                   KERNEL_CONFIGURE=no \
-                  BUILD_MINIMAL=${{ matrix.IMAGE_TYPE == 'minimal' && 'yes' || 'no' }} \
-                  BUILD_DESKTOP=${{ matrix.IMAGE_TYPE == 'desktop' && 'yes' || 'no' }} \
+                  BUILD_MINIMAL=${{ matrix.TYPE == 'minimal' && 'yes' || 'no' }} \
+                  BUILD_DESKTOP=${{ matrix.TYPE == 'desktop' && 'yes' || 'no' }} \
                   DESKTOP_ENVIRONMENT= \
                   DESKTOP_ENVIRONMENT_CONFIG_NAME= \
                   DESKTOP_APPGROUPS_SELECTED= \
@@ -120,10 +215,9 @@ jobs:
                   SKIP_EXTERNAL_TOOLCHAINS=yes \
                   CLEAN_LEVEL= \
                   USE_CCACHE=no \
-                  COMPRESS_OUTPUTIMAGE=img
+                  COMPRESS_OUTPUTIMAGE=img    
           fi
           
-
           sudo chown $(id -u):$(id -g) -R output/
           
       - name: 安装依赖项
@@ -180,30 +274,22 @@ jobs:
           cat <<EOF | sed -E 's/^  //' | tee Release.md
             $(cat sha256sum | awk '{printf "%s: `%s`\n", $2, $1}')
           EOF
-
+          
       - name: 提取版本号
         run: |  
           # 提取版本号
-          # latest_image=$(ls ${{ github.workspace }}/build/output/images/Armbian-unofficial_*.img.xz | grep -oE 'Armbian-unofficial_[0-9.]+_.*' | sort -V | tail -n 1) 
-          latest_image=$(ls ${{ github.workspace }}/build/output/images/Armbian-unofficial_*.img.xz | sort -V | tail -n 1)
-          version=$(echo "$latest_image" | cut -d'_' -f2)  
-  
+          # latest_image=$(ls build/output/images/Armbian-unofficial_*.burn.img.xz | grep -oE 'Armbian-unofficial_[0-9.]+_.*' | sort -V | tail -n 1) 
+          latest_image=$(ls build/output/images/Armbian-unofficial_*.burn.img.xz | sort -V | tail -n 1)
+          version=$(echo "$latest_image" | cut -d'_' -f 2)
+          
           # 将版本号设置为环境变量  
-          echo "VERSION=$version" >> $GITHUB_ENV
+          echo "version=$version" >> $GITHUB_ENV
           
       - name: 生成标签，上传固件
-        uses: ncipollo/release-action@main
+        uses: softprops/action-gh-release@v2
         with:
-          allowUpdates: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{env.show_tag_name}}
-          artifacts: build/output/images/*
-          removeArtifacts: false 
-          replacesArtifacts: true          
-          body: | 
-            ====================🧊固件信息🧊=======================
-            ➦ 💻 固件源码：https://github.com/armbian/build
-            ➦ 💝 源码分支：${{ github.event.inputs.BRANCH_TYPE }}
-            ➦ 🚀 编译版本：${{ env.version }}
-            ➦ 🌐 默认用户：root
-            ➦ 🔑 默认密码：1234
+          tag_name: ${{ env.CORE_TAG }}
+          append_body: true
+          body_path: Release.md
+          files: |
+            build/output/images/*
