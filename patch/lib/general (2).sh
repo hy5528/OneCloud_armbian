@@ -262,6 +262,7 @@ create_sources_list()
 		mv "${SDCARD}"/etc/apt/sources.list.d/armbian.list "${SDCARD}"/etc/apt/sources.list.d/armbian.list.disabled
 	fi
 
+
 }
 
 
