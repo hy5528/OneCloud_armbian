@@ -35,8 +35,8 @@ jobs:
           # - oracular # Ubuntu 24.10
           # - plucky # Ubuntu 25.04
           # - buster # Debian 10
-          # - bullseye # Debian 11
-          - bookworm # Debian 12
+          - bullseye # Debian 11
+          # - bookworm # Debian 12
           # - trixie # Debian 13
           # - sid # Debian unstable
         
@@ -76,7 +76,7 @@ jobs:
     
       - name: 下载最新armbian库
         run: |
-           git clone --depth=1 --branch=v22.11 https://github.com/armbian/build build
+           git clone --depth=1 --branch=master https://github.com/qtvhao/armhf-build build
            
            TIME="$(curl https://api.github.com/repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID} | jq -r .created_at)"
            TAG="玩客云armbian最新版-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S-%Z')"
