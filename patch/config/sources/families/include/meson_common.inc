@@ -32,9 +32,7 @@ case $BRANCH in
 	;;
 	edge)
 
-		KERNELDIR='linux-meson'
-		KERNELSOURCE='https://github.com/xdarklight/linux'
-		KERNELBRANCH="branch:meson-mx-integration-5.18-20220417"
+		KERNELBRANCH="branch:linux-5.18.y"
 		KERNELPATCHDIR='meson-'$BRANCH
 
 	;;
