@@ -92,7 +92,7 @@ jobs:
             $(cat sha256sum | awk '{printf "%s: `%s`\n", $2, $1}')
           EOF
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.1.0
         with:
           tag_name: Armbian_Onecloud
           append_body: true
