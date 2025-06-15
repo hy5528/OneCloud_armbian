@@ -7,13 +7,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    - name: Check
-        run: |
-          cd /opt
-          sudo chmod 777 /opt
-          wget https://github.com/hy5528/OneCloud_armbian/releases/download/Armbian_Onecloud_jammy_5.9.0-docker/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
-          sudo chmod 777 gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
-          sudo unzip gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+    cd /opt
+    sudo chmod 777 /opt
+    wget https://github.com/hy5528/OneCloud_armbian/releases/download/Armbian_Onecloud_jammy_5.9.0-docker/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+    sudo chmod 777 gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+    sudo unzip gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
       
     steps:
       - name: 释放磁盘空间
