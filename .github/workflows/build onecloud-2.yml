@@ -21,18 +21,18 @@ jobs:
           docker-images: true
           swap-storage: true
           
-      - name: Checkout 
-        run: |
-          cd build
-          wget https://github.com/hy5528/OneCloud_armbian/releases/download/Armbian_Onecloud_jammy_5.9.0-docker/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
-          sudo chmod 777 gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
-          sudo unzip gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+      
           
       - name: Checkout armbian
         run: |
            git clone --depth=1 --branch=main https://github.com/hy5528/build.git build 
       
-          
+      - name: Check
+        run: |
+          cd build
+          wget https://github.com/hy5528/OneCloud_armbian/releases/download/Armbian_Onecloud_jammy_5.9.0-docker/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+          sudo chmod 777 gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip
+          sudo unzip gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf.zip   
       - name: Build
         run: |
           cd build
