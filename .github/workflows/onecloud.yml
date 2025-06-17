@@ -12,7 +12,7 @@ on:
         type: choice
         options:
         - current
-        # - edge
+        - legacy 
 
 permissions:
   contents: write
