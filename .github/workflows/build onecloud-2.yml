@@ -25,7 +25,7 @@ jobs:
           
       - name: Checkout armbian
         run: |
-           git clone --depth=1 --branch=master https://github.com/hy5528/build.git build 
+           git clone --depth=1 --branch=master https://github.com/armbian/build.git build 
       
          
       - name: Build
