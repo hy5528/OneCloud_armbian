@@ -37,7 +37,7 @@ case $BRANCH in
 	current)
 
 		KERNELBRANCH="branch:linux-5.15.y"
-		KERNELBRANCH='commit:85d7786c66b69d3f07cc149ac2f78d8f330c7c11'
+		KERNELBRANCH='commit:0c935c049b5c196b83b968c72d348ae6fff83ea2'
 		KERNELPATCHDIR='meson-'$BRANCH
 
 		;;
