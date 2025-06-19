@@ -53,7 +53,7 @@ jobs:
         run: |
           git clone --depth=1 --branch=master https://github.com/hy5528/onecloud-armbian-build build
           cd build
-          ./compile.sh \
+          sudo ./compile.sh \
           BOARD=onecloud \
           BRANCH=edge \
           RELEASE=jammy \
