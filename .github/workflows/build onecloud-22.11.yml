@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential debootstrap python3-httpx
+          sudo apt-get install -y git build-essential debootstrap 
       - name: Checkout armbian
         run: |
            git clone --depth=1 --branch=master https://github.com/hy5528/s805-armbian-build.git build 
