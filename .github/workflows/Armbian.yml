@@ -48,12 +48,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential debootstrap python3-httpx
+          sudo apt-get install -y git build-essential debootstrap 
+
+      - name: Checkout armbian
+        run: |
+           git clone --depth=1 --branch=main https://github.com/soulteary/armbian-build-s805.git build 
+      - name: "Checkout current repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: false
+          path: current
+          
+      - name: "Copy userpatches to build folder"
+        shell: bash
+        run: |
+          sudo rm -r build/lib    
+          rsync -av current/patch/. build/
+          sudo chmod 777 build/compile.sh
       - name: Build Armbian
         run: |
-          git clone --depth=1 --branch=master https://github.com/5m44p1x/armbian-build-s805 build
           cd build
-           sudo ./compile.sh build BOARD=onecloud BRANCH=edge RELEASE=jammy KERNEL_CONFIGURE=no BUILD_MINIMAL=no BUILD_DESKTOP=no EXPERT=yes SKIP_EXTERNAL_TOOLCHAINS=yes CLEAN_LEVEL= USE_CCACHE=no COMPRESS_OUTPUTIMAGE=img MANAGE_ACNG=no UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn/armbian DOWNLOAD_MIRROR=china
+           sudo ./compile.sh build BOARD=onecloud BRANCH=current RELEASE=bookworm KERNEL_CONFIGURE=no BUILD_MINIMAL=yes BUILD_DESKTOP=no EXPERT=yes SKIP_EXTERNAL_TOOLCHAINS=yes CLEAN_LEVEL= USE_CCACHE=no COMPRESS_OUTPUTIMAGE=img MANAGE_ACNG=no UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn/armbian DOWNLOAD_MIRROR=china
           sudo chown $(id -u):$(id -g) -R output/
           
       - name: Install Dependents
