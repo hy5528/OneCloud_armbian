@@ -33,18 +33,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set variables
-        run: |
-          if [[ "${{ github.event.inputs.upload_artifacts }}" == 'true' ]]; then
-            echo "UPLOAD_ARTIFACTS=true" >> $GITHUB_ENV
-          else
-            echo "UPLOAD_ARTIFACTS=false" >> $GITHUB_ENV
-          fi
-          if [[ "${{ github.event.inputs.upload_release }}" == 'true' ]]; then
-            echo "UPLOAD_RELEASE=true" >> $GITHUB_ENV
-          else
-            echo "UPLOAD_RELEASE=false" >> $GITHUB_ENV
-          fi
+      
       - name: Install dependencies
         run: |
           sudo apt-get update
