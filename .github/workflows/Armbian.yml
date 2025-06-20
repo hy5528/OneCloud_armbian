@@ -58,7 +58,7 @@ jobs:
       - name: Build Armbian
         run: |
           cd build
-           sudo ./compile.sh build BOARD=onecloud BRANCH=current RELEASE=bookworm KERNEL_CONFIGURE=no BUILD_MINIMAL=yes BUILD_DESKTOP=no EXPERT=yes SKIP_EXTERNAL_TOOLCHAINS=yes CLEAN_LEVEL= USE_CCACHE=no COMPRESS_OUTPUTIMAGE=img MANAGE_ACNG=no UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn/armbian DOWNLOAD_MIRROR=china
+          sudo ./compile.sh build BOARD=onecloud BRANCH=current RELEASE=bookworm KERNEL_CONFIGURE=no BUILD_MINIMAL=yes BUILD_DESKTOP=no EXPERT=yes SKIP_EXTERNAL_TOOLCHAINS=yes CLEAN_LEVEL= USE_CCACHE=no COMPRESS_OUTPUTIMAGE=img MANAGE_ACNG=no UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn/armbian DOWNLOAD_MIRROR=china
           sudo chown $(id -u):$(id -g) -R output/
           
       - name: Install Dependents
