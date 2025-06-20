@@ -19,56 +19,53 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 释放磁盘空间
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-          
       - name: Checkout code
         uses: actions/checkout@v4
 
-      
+      - name: Set variables
+        run: |
+          if [[ "${{ github.event.inputs.upload_artifacts }}" == 'true' ]]; then
+            echo "UPLOAD_ARTIFACTS=true" >> $GITHUB_ENV
+          else
+            echo "UPLOAD_ARTIFACTS=false" >> $GITHUB_ENV
+          fi
+          if [[ "${{ github.event.inputs.upload_release }}" == 'true' ]]; then
+            echo "UPLOAD_RELEASE=true" >> $GITHUB_ENV
+          else
+            echo "UPLOAD_RELEASE=false" >> $GITHUB_ENV
+          fi
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential debootstrap 
-
+          sudo apt-get install -y git build-essential debootstrap
       - name: Checkout armbian
         run: |
-           git clone --depth=1 --branch=main https://github.com/soulteary/armbian-build-s805.git build 
-      - name: "Checkout current repository"
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          clean: false
-          path: current
+          git clone --depth=1 --branch=main https://github.com/armbian/build.git build 
           
-      - name: "Copy userpatches to build folder"
-        shell: bash
-        run: |
-          sudo rm -r build/lib    
-          rsync -av current/patch/. build/
-          sudo chmod 777 build/compile.sh
       - name: Build Armbian
-        run: |
+        run: | 
           cd build
-          sudo ./compile.sh build BOARD=onecloud BRANCH=current RELEASE=bookworm KERNEL_CONFIGURE=no BUILD_MINIMAL=yes BUILD_DESKTOP=no EXPERT=yes SKIP_EXTERNAL_TOOLCHAINS=yes CLEAN_LEVEL= USE_CCACHE=no COMPRESS_OUTPUTIMAGE=img MANAGE_ACNG=no UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn/armbian DOWNLOAD_MIRROR=china
+          ./compile.sh \
+          BOARD=onecloud \
+          BRANCH=current \
+          RELEASE=bookworm \
+          BUILD_MINIMAL=yes \
+          BUILD_DESKTOP=no \
+          KERNEL_CONFIGURE=no
           sudo chown $(id -u):$(id -g) -R output/
-          
+
       - name: Install Dependents
         run: |
           sudo apt install img2simg
+
           ver="v0.3.1"
           chmod +x ./AmlImg
+
       - name: Download and unpack the latest u-boot
         run: |
           ./AmlImg unpack ./uboot.img burn/
+
       - name: Extract boot and rootfs partitions
         run: |
           diskimg=$(ls build/output/images/*.img)
@@ -77,29 +74,35 @@ jobs:
           sudo img2simg ${loop}p2 burn/rootfs.simg
           sudo losetup -d $loop
           sudo chown $(id -u):$(id -g) -R burn/
+
       - name: Generate burn image
         run: |
           echo -n "sha1sum $(sha1sum burn/boot.simg | awk '{print $1}')" >burn/boot.VERIFY
           echo -n "sha1sum $(sha1sum burn/rootfs.simg | awk '{print $1}')" >burn/rootfs.VERIFY
+
           cat <<EOF >>burn/commands.txt
           PARTITION:boot:sparse:boot.simg
           VERIFY:boot:normal:boot.VERIFY
           PARTITION:rootfs:sparse:rootfs.simg
           VERIFY:rootfs:normal:rootfs.VERIFY
           EOF
+
           prefix=$(ls ./build/output/images/*.img | sed 's/\.img$//')
           burnimg=${prefix}.burn.img
           ./AmlImg pack $burnimg burn/
+
       - name: Hash and compress images
         run: |
           for f in ./build/output/images/*.img; do
             sha256sum "$f" | tee -a sha256sum
             xz --threads=0 --compress "$f"
           done
+
       - name: Create Release Tag
         if: env.UPLOAD_RELEASE == 'true'
         run: |
           echo "release_tag=$(date +%Y%m%d)" >> $GITHUB_ENV
+
       - name: Upload artifacts
         if: env.UPLOAD_ARTIFACTS == 'true'
         uses: actions/upload-artifact@main
