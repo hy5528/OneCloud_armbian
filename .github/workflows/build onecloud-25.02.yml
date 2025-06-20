@@ -21,7 +21,11 @@ jobs:
           docker-images: true
           swap-storage: true
           
-    
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git build-essential debootstrap
+          
       - name: Checkout armbian
         run: |
            git clone --depth=1 --branch=main https://github.com/soulteary/armbian-build-s805.git build 
