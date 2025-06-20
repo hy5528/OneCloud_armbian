@@ -35,7 +35,10 @@ jobs:
         run: |
           cd build
           # Don't update remote cache
-          sudo ./compile.sh BOARD=onecloud BRANCH=edge RELEASE=bullseye BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_ONLY=no KERNEL_CONFIGURE=no COMPRESS_OUTPUTIMAGE=sha,gpg,img DOWNLOAD_MIRROR=china MAINLINE_MIRROR=tuna EXTRAWIFI=no
+          
+          ./compile.sh RELEASE=bullseye BUILD_MINIMAL=no \
+    BOARD=onecloud BRANCH=current BUILD_ONLY=default HOST=armbian BUILD_DESKTOP=no EXPERT=yes \
+    KERNEL_CONFIGURE=no CLEAN_LEVEL="make,cache,alldebs,sources" COMPRESS_OUTPUTIMAGE="sha"
           sudo chown $(id -u):$(id -g) -R output/
       - name: Install Dependents
         run: |
